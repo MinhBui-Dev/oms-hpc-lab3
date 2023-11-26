@@ -155,19 +155,6 @@ void terasort(terarec_t *local_data, int  local_len,
 
 	// find last partition size
 	partitions[partition_index].size = local_len - left;
-	
-	
-	
-	
-	
-	// for (int i = 0; i < local_len; i++)
-	// {
-	// 	while (splitter_index < splitter_size && teraCompare(&local_data[i], &splitters[splitter_index]) > 0)
-	// 	{
-	// 		splitter_index++;
-	// 	}
-	// 	partitions[splitter_index].size++;
-	// }
 
 	// print partition size regardless of rank
 	// printf("partition size of rank %d: ", rank);
@@ -196,21 +183,7 @@ void terasort(terarec_t *local_data, int  local_len,
 		}
 	}
 	
-	
-	
-	// partition data
-	// splitter_index = 0;
-	// int partition_index = 0;
-	// for (int i = 0; i < local_len; i++)
-	// {
-	// 	while (splitter_index < splitter_size && teraCompare(&local_data[i], &splitters[splitter_index]) > 0)
-	// 	{
-	// 		splitter_index++;
-	// 		partition_index = 0;
-	// 	}
-	// 	partitions[splitter_index].data[partition_index] = local_data[i];
-	// 	partition_index++;
-	// }
+
 
 	free(splitters);
 	// 8. Exchange values
@@ -223,26 +196,43 @@ void terasort(terarec_t *local_data, int  local_len,
 
 	// allocate buffer for receiving data
 	terarec_t* recv_buff = malloc(sizeof(terarec_t) * local_len);
+	terarec_t* recv_buff_2 = malloc(sizeof(terarec_t) * local_len);
 	partition_t* recv_partition = malloc(sizeof(partition_t) * P);
 
 	
-
+	MPI_Status old_status;
 
 	for (int i = 1; i < P; i++)
 	{
 		int dest = (rank + i) % P;
 		int source = (rank - i + P) % P;
 		MPI_Status receive_status;
-		MPI_Sendrecv(partitions[dest].data, partitions[dest].size, mpi_tera_type, dest, 0,
-					 recv_buff, local_len, mpi_tera_type, source, 0,
-					 MPI_COMM_WORLD, &receive_status);
-
-		int count = 0;
-		MPI_Get_count(&receive_status, mpi_tera_type, &count);
-		recv_partition[source].data = malloc(sizeof(terarec_t) * count);
-		memcpy(recv_partition[source].data, recv_buff, sizeof(terarec_t) * count);
-		recv_partition[source].size = count;
+		MPI_Request send_request, receive_request;
+		MPI_Isend(partitions[dest].data, partitions[dest].size, mpi_tera_type, dest, 0, MPI_COMM_WORLD, &send_request);
+		MPI_Irecv(recv_buff, local_len, mpi_tera_type, source, 0, MPI_COMM_WORLD, &receive_request);
+		if (i > 1)
+		{
+			int count = 0;
+			MPI_Get_count(&old_status, mpi_tera_type, &count);
+			recv_partition[old_status.MPI_SOURCE].data = malloc(sizeof(terarec_t) * count);
+			memcpy(recv_partition[old_status.MPI_SOURCE].data, recv_buff_2, sizeof(terarec_t) * count);
+			recv_partition[old_status.MPI_SOURCE].size = count;
+		}
+		
+		MPI_Wait(&receive_request, &receive_status);
+		old_status = receive_status;
+		terarec_t* temp = recv_buff_2;
+		recv_buff_2 = recv_buff;
+		recv_buff = temp;
 	}
+
+	// receive data from last rank
+	int count = 0;
+	MPI_Get_count(&old_status, mpi_tera_type, &count);
+	recv_partition[old_status.MPI_SOURCE].data = malloc(sizeof(terarec_t) * count);
+	memcpy(recv_partition[old_status.MPI_SOURCE].data, recv_buff_2, sizeof(terarec_t) * count);
+	recv_partition[old_status.MPI_SOURCE].size = count;
+	
 
 	free(recv_buff);
 
