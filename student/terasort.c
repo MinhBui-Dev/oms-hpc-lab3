@@ -2,6 +2,7 @@
 #include <unistd.h>
 #include <stdio.h>
 #include <string.h>
+#include <omp.h>
 
 #include "terarec.h"
 
@@ -43,6 +44,51 @@ int find_index_less_than(terarec_t* data, int left, int right, terarec_t* splitt
 	return result;
 }
 
+void merge(terarec_t* data, int n, terarec_t* temp){
+	int i = 0;
+	int j = n/2;
+	int k = 0;
+	while (i < n/2 && j < n)
+	{
+		if (teraCompare(&data[i], &data[j]) < 0)
+		{
+			temp[k] = data[i];
+			i++;
+		} else {
+			temp[k] = data[j];
+			j++;
+		}
+		k++;
+	}
+	while (i < n/2)
+	{
+		temp[k] = data[i];
+		i++;
+		k++;
+	}
+	while (j < n)
+	{
+		temp[k] = data[j];
+		j++;
+		k++;
+	}
+	memcpy(data, temp, sizeof(terarec_t) * n);
+}
+
+void merge_sort(terarec_t* data, int n, terarec_t* temp){
+	if (n < 2)
+	{
+		return;
+	}
+	#pragma omp task shared(data) if(n > 100)
+	merge_sort(data, n/2, temp);
+
+	#pragma omp task shared(data) if(n > 100)
+	merge_sort(data + n/2, n - n/2, temp);
+
+	#pragma omp taskwait
+	merge(data, n, temp);
+}
 void terasort(terarec_t *local_data, int  local_len, 
 			  terarec_t **sorted_data, int* sorted_counts, long* sorted_displs){
 	
@@ -63,11 +109,20 @@ void terasort(terarec_t *local_data, int  local_len,
 	MPI_Comm_size (MPI_COMM_WORLD, &P);
 	MPI_Comm_rank (MPI_COMM_WORLD, &rank);
 
+	terarec_t* temp = malloc(sizeof(terarec_t) * local_len);
+
 
 	// 1. Local Sort
-	qsort(local_data, local_len, sizeof(terarec_t), teraCompare);
 
-	
+	// merge sort
+	#pragma omp parallel
+	{
+		#pragma omp single
+		merge_sort(local_data, local_len, temp);
+	}
+	//qsort(local_data, local_len, sizeof(terarec_t), teraCompare);
+
+	free(temp);
 	// 2. Select P-1 sample
 	int sample_size = P-1;
 	terarec_t* samples = select_samples(local_data, local_len, sample_size);
@@ -88,7 +143,17 @@ void terasort(terarec_t *local_data, int  local_len,
 
 	if (rank == 0)
 	{
-		qsort(all_samples, sample_size * P, sizeof(terarec_t), teraCompare);
+		// sort samples
+		terarec_t* temp = malloc(sizeof(terarec_t) * sample_size * P);
+		// merge sort
+		#pragma omp parallel
+		{
+			#pragma omp single
+			merge_sort(all_samples, sample_size * P, temp);
+		}
+
+		free(temp);
+		//qsort(all_samples, sample_size * P, sizeof(terarec_t), teraCompare);
 
 		// print sorted samples
 		// printf("sorted samples:\n");
@@ -232,7 +297,7 @@ void terasort(terarec_t *local_data, int  local_len,
 	recv_partition[old_status.MPI_SOURCE].data = malloc(sizeof(terarec_t) * count);
 	memcpy(recv_partition[old_status.MPI_SOURCE].data, recv_buff_2, sizeof(terarec_t) * count);
 	recv_partition[old_status.MPI_SOURCE].size = count;
-	
+
 
 	free(recv_buff);
 
@@ -261,7 +326,16 @@ void terasort(terarec_t *local_data, int  local_len,
 	}
 
 	// sort unsorted data
-	qsort(*sorted_data, total_size, sizeof(terarec_t), teraCompare);
+	// merge sort
+	temp = malloc(sizeof(terarec_t) * total_size);
+	#pragma omp parallel
+	{
+		#pragma omp single
+		merge_sort(*sorted_data, total_size, temp);
+	}
+	
+	free(temp);
+	//qsort(*sorted_data, total_size, sizeof(terarec_t), teraCompare);
 
 	//print sorted counts
 	//printf("sorted counts of rank %d: %d\n", rank, total_size);
