@@ -218,7 +218,7 @@ void terasort(terarec_t *local_data, int  local_len,
 			memcpy(recv_partition[old_status.MPI_SOURCE].data, recv_buff_2, sizeof(terarec_t) * count);
 			recv_partition[old_status.MPI_SOURCE].size = count;
 		}
-		
+		MPI_Wait(&send_request, MPI_STATUS_IGNORE);
 		MPI_Wait(&receive_request, &receive_status);
 		old_status = receive_status;
 		terarec_t* temp = recv_buff_2;
