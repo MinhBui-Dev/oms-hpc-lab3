@@ -80,11 +80,11 @@ void merge_sort(terarec_t* data, int n, terarec_t* temp){
 	{
 		return;
 	}
-	#pragma omp task shared(data) if(n > 100)
+	#pragma omp task shared(data)
 	merge_sort(data, n/2, temp);
 
-	#pragma omp task shared(data) if(n > 100)
-	merge_sort(data + n/2, n - n/2, temp);
+	#pragma omp task shared(data)
+	merge_sort(data + n/2, n - n/2, temp + n/2);
 
 	#pragma omp taskwait
 	merge(data, n, temp);
@@ -144,16 +144,16 @@ void terasort(terarec_t *local_data, int  local_len,
 	if (rank == 0)
 	{
 		// sort samples
-		terarec_t* temp = malloc(sizeof(terarec_t) * sample_size * P);
-		// merge sort
-		#pragma omp parallel
-		{
-			#pragma omp single
-			merge_sort(all_samples, sample_size * P, temp);
-		}
+		// temp = malloc(sizeof(terarec_t) * sample_size * P);
+		// // merge sort
+		// #pragma omp parallel
+		// {
+		// 	#pragma omp single
+		// 	merge_sort(all_samples, sample_size * P, temp);
+		// }
 
-		free(temp);
-		//qsort(all_samples, sample_size * P, sizeof(terarec_t), teraCompare);
+		// free(temp);
+		qsort(all_samples, sample_size * P, sizeof(terarec_t), teraCompare);
 
 		// print sorted samples
 		// printf("sorted samples:\n");
