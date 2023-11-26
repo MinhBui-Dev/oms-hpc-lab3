@@ -26,6 +26,23 @@ terarec_t* select_splitters(terarec_t* samples, int sample_size, int splitter_si
 	return splitters;
 }
 
+int find_index_less_than(terarec_t* data, int left, int right, terarec_t* splitters){
+	//printf("left: %d, right: %d\n", left, right);
+	int result = -1;
+	while (left <= right)
+	{
+		int mid = (left + right) / 2;
+		if (teraCompare(&data[mid], splitters) < 0)
+		{
+			result = mid;
+			left = mid + 1;
+		} else {
+			right = mid - 1;
+		}
+	}
+	return result;
+}
+
 void terasort(terarec_t *local_data, int  local_len, 
 			  terarec_t **sorted_data, int* sorted_counts, long* sorted_displs){
 	
@@ -119,17 +136,38 @@ void terasort(terarec_t *local_data, int  local_len,
 		partitions[i].size = 0;
 	}
 	int splitter_index = 0;
-	
-	
-	
-	for (int i = 0; i < local_len; i++)
+
+	// find partition size
+	int partition_index = 0;
+	int left = 0;
+	int right = local_len - 1;
+	for (partition_index = 0; partition_index < P-1; partition_index++)
 	{
-		while (splitter_index < splitter_size && teraCompare(&local_data[i], &splitters[splitter_index]) > 0)
-		{
-			splitter_index++;
-		}
-		partitions[splitter_index].size++;
+		int end_index = find_index_less_than(local_data, left, right, &splitters[splitter_index]);
+		if (end_index != -1){
+			partitions[partition_index].size = end_index - left + 1;
+			left = end_index + 1;
+		} else {
+			partitions[partition_index].size = 0;
+		}		
+		splitter_index++;
 	}
+
+	// find last partition size
+	partitions[partition_index].size = local_len - left;
+	
+	
+	
+	
+	
+	// for (int i = 0; i < local_len; i++)
+	// {
+	// 	while (splitter_index < splitter_size && teraCompare(&local_data[i], &splitters[splitter_index]) > 0)
+	// 	{
+	// 		splitter_index++;
+	// 	}
+	// 	partitions[splitter_index].size++;
+	// }
 
 	// print partition size regardless of rank
 	// printf("partition size of rank %d: ", rank);
@@ -144,24 +182,35 @@ void terasort(terarec_t *local_data, int  local_len,
 	// allocate memory for each partition
 	for (int i = 0; i < P; i++)
 	{
-		partitions[i].data = malloc(sizeof(terarec_t) * partitions[i].size);
+		partitions[i].data = calloc(partitions[i].size, sizeof(terarec_t));
+	}
+
+	// move data to each partition using memcpy
+	int data_index = 0;
+	for (int i = 0; i < P; i++)
+	{
+		if (partitions[i].size != 0)
+		{
+			memcpy(partitions[i].data, local_data + data_index, sizeof(terarec_t) * partitions[i].size);
+			data_index += partitions[i].size;
+		}
 	}
 	
 	
 	
 	// partition data
-	splitter_index = 0;
-	int partition_index = 0;
-	for (int i = 0; i < local_len; i++)
-	{
-		while (splitter_index < splitter_size && teraCompare(&local_data[i], &splitters[splitter_index]) > 0)
-		{
-			splitter_index++;
-			partition_index = 0;
-		}
-		partitions[splitter_index].data[partition_index] = local_data[i];
-		partition_index++;
-	}
+	// splitter_index = 0;
+	// int partition_index = 0;
+	// for (int i = 0; i < local_len; i++)
+	// {
+	// 	while (splitter_index < splitter_size && teraCompare(&local_data[i], &splitters[splitter_index]) > 0)
+	// 	{
+	// 		splitter_index++;
+	// 		partition_index = 0;
+	// 	}
+	// 	partitions[splitter_index].data[partition_index] = local_data[i];
+	// 	partition_index++;
+	// }
 
 	free(splitters);
 	// 8. Exchange values
