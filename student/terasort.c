@@ -104,11 +104,9 @@ void terasort(terarec_t *local_data, int  local_len,
 	// 7. Partition Using Splitters
 	// sample the size of each partition by loop through local data and compare with splitters
 
-
 	int* partition_sizes = malloc(sizeof(partition_t) * P);
 	int* partition_displs = malloc(sizeof(partition_t) * P);
 
-	
 
 	// find partition size
 	int splitter_index = 0;
@@ -130,6 +128,7 @@ void terasort(terarec_t *local_data, int  local_len,
 		splitter_index++;
 	}
 	free(splitters);
+
 	// find last partition size
 	partition_sizes[partition_index] = local_len - left;
 	partition_displs[partition_index] = left;
@@ -142,12 +141,12 @@ void terasort(terarec_t *local_data, int  local_len,
 	// printf("\n");
 
 	//print partition size regardless of rank
-	// printf("partition size of rank %d: ", rank);
-	// for (int i = 0; i < P; i++)
-	// {
-	// 	printf("%d ", partition_sizes[i]);
-	// }
-	// printf("\n");
+	printf("partition size of rank %d: ", rank);
+	for (int i = 0; i < P; i++)
+	{
+		printf("%d ", partition_sizes[i]);
+	}
+	printf("\n");
 
 	
 	// 8. Exchange values
@@ -159,63 +158,102 @@ void terasort(terarec_t *local_data, int  local_len,
 	// while rank 0 receive from rank P-2, rank 1 receive from rank P-1, ..., rank P-1 receive from rank P-3
 
 	// allocate buffer for receiving data
-	terarec_t* recv_buff = malloc(sizeof(terarec_t) * local_len);
-	terarec_t* recv_buff_2 = malloc(sizeof(terarec_t) * local_len);
-	partition_t* recv_partition = malloc(sizeof(partition_t) * P);
+	int* recv_partition_sizes = malloc(sizeof(int) * P);
+	
+	MPI_Alltoall(partition_sizes, 1, MPI_INT, recv_partition_sizes, 1, MPI_INT, MPI_COMM_WORLD);
 
-	MPI_Status old_status;
+	printf("recv partition size of rank %d: ", rank);
+	for (size_t i = 0; i < P; i++)
+	{
+		printf("%d ", recv_partition_sizes[i]);
+	}
+	printf("\n");
 
+	//calculate displacements and total size of recv data
 	int total_size = 0;
+	for (size_t i = 0; i < P; i++)
+	{
+		total_size += recv_partition_sizes[i];
+	}
+	
+	MPI_Barrier(MPI_COMM_WORLD);
 
+	//printf("Total size of rank %d: %d\n", rank, total_size);
+	
+	// allocate buffer for unsorted data
+	*sorted_data = malloc(sizeof(terarec_t) * total_size);
+
+	
+	//terarec_t* recv_buff = malloc(sizeof(terarec_t) * local_len);
+	//terarec_t* recv_buff_2 = malloc(sizeof(terarec_t) * local_len);
+	//partition_t* recv_partition = malloc(sizeof(partition_t) * P);
+
+	//MPI_Status old_status;
+
+	//int total_size = 0;
+
+	int index = 0;
+	int count = 0;
 	for (int i = 1; i < P; i++)
 	{
 		int dest = (rank + i) % P;
 		int source = (rank - i + P) % P;
 		MPI_Status receive_status;
-		MPI_Request send_request, receive_request;
+		//MPI_Request send_request, receive_request;
 		int displs = partition_displs[dest];
 		if (displs >= local_len)
 		{
 			displs = local_len - 1;
 		}
+
+		MPI_Sendrecv(local_data + displs, partition_sizes[dest], mpi_tera_type, dest, 0, 
+					 *sorted_data + index, recv_partition_sizes[source], mpi_tera_type, source, 0, 
+					 MPI_COMM_WORLD, &receive_status);
 		
-		MPI_Isend(local_data + displs, partition_sizes[dest], mpi_tera_type, dest, 0, MPI_COMM_WORLD, &send_request);
-		MPI_Irecv(recv_buff, local_len, mpi_tera_type, source, 0, MPI_COMM_WORLD, &receive_request);
-		if (i > 1)
-		{
-			int count = 0;
-			MPI_Get_count(&old_status, mpi_tera_type, &count);
-			recv_partition[old_status.MPI_SOURCE].data = malloc(sizeof(terarec_t) * count);
-			recv_partition[old_status.MPI_SOURCE].size = count;
-			total_size += count;
-			memcpy(recv_partition[old_status.MPI_SOURCE].data, recv_buff_2, sizeof(terarec_t) * count);
-		} else {
-			recv_partition[rank].data = malloc(sizeof(terarec_t) * partition_sizes[rank]);
-			recv_partition[rank].size = partition_sizes[rank];
-			memcpy(recv_partition[rank].data, local_data + partition_displs[rank], sizeof(terarec_t) * partition_sizes[rank]);
-			total_size =+ partition_sizes[rank];
-		}
-		MPI_Wait(&send_request, MPI_STATUS_IGNORE);
-		MPI_Wait(&receive_request, &receive_status);
-		old_status = receive_status;
-		terarec_t* temp = recv_buff_2;
-		recv_buff_2 = recv_buff;
-		recv_buff = temp;
+		// MPI_Isend(local_data + displs, partition_sizes[dest], mpi_tera_type, dest, 0, MPI_COMM_WORLD, &send_request);
+		// MPI_Irecv(recv_buff, local_len, mpi_tera_type, source, 0, MPI_COMM_WORLD, &receive_request);
+		// if (i > 1)
+		// {
+		// 	int count = 0;
+		// 	MPI_Get_count(&old_status, mpi_tera_type, &count);
+		// 	recv_partition[old_status.MPI_SOURCE].data = malloc(sizeof(terarec_t) * count);
+		// 	recv_partition[old_status.MPI_SOURCE].size = count;
+		// 	total_size += count;
+		// 	memcpy(recv_partition[old_status.MPI_SOURCE].data, recv_buff_2, sizeof(terarec_t) * count);
+		// } else {
+		// 	recv_partition[rank].data = malloc(sizeof(terarec_t) * partition_sizes[rank]);
+		// 	recv_partition[rank].size = partition_sizes[rank];
+		// 	memcpy(recv_partition[rank].data, local_data + partition_displs[rank], sizeof(terarec_t) * partition_sizes[rank]);
+		// 	total_size =+ partition_sizes[rank];
+		// }
+		// MPI_Wait(&send_request, MPI_STATUS_IGNORE);
+		// MPI_Wait(&receive_request, &receive_status);
+		// old_status = receive_status;
+		// terarec_t* temp = recv_buff_2;
+		// recv_buff_2 = recv_buff;
+		// recv_buff = temp;
+		MPI_Get_count(&receive_status, mpi_tera_type, &count);
+		index += count;
 	}
 
 	
 	// receive data from last rank
-	int count = 0;
-	MPI_Get_count(&old_status, mpi_tera_type, &count);
-	recv_partition[old_status.MPI_SOURCE].data = malloc(sizeof(terarec_t) * count);
-	recv_partition[old_status.MPI_SOURCE].size = count;
-	total_size += count;
-	memcpy(recv_partition[old_status.MPI_SOURCE].data, recv_buff_2, sizeof(terarec_t) * count);
-	
-	
+	// int count = 0;
+	// MPI_Get_count(&old_status, mpi_tera_type, &count);
+	// recv_partition[old_status.MPI_SOURCE].data = malloc(sizeof(terarec_t) * count);
+	// recv_partition[old_status.MPI_SOURCE].size = count;
+	// total_size += count;
+	// memcpy(recv_partition[old_status.MPI_SOURCE].data, recv_buff_2, sizeof(terarec_t) * count);
 
-	free(recv_buff);
-	free(recv_buff_2);
+
+	
+	memcpy(*sorted_data + index, local_data + partition_displs[rank], sizeof(terarec_t) * partition_sizes[rank]);
+
+	printf("total index of rank %d: %d\n", rank, index + partition_sizes[rank]);
+	printf("total size of rank %d: %d\n", rank, total_size);
+
+	// free(recv_buff);
+	// free(recv_buff_2);
 
 	// copy data from own partition to recv_partition
 	
@@ -232,17 +270,20 @@ void terasort(terarec_t *local_data, int  local_len,
 	// }
 
 	// allocate memory for unsorted data
-	*sorted_data = malloc(sizeof(terarec_t) * total_size);
+	// *sorted_data = malloc(sizeof(terarec_t) * total_size);
 
-	// copy data from recv_partition to unsorted_data
-	int index = 0;
-	for (int i = 0; i < P; i++)
-	{
-		memcpy(*sorted_data + index, recv_partition[i].data, sizeof(terarec_t) * recv_partition[i].size);
-		index += recv_partition[i].size;
-	}
+	// // copy data from recv_partition to unsorted_data
+	// int index = 0;
+	// for (int i = 0; i < P; i++)
+	// {
+	// 	memcpy(*sorted_data + index, recv_partition[i].data, sizeof(terarec_t) * recv_partition[i].size);
+	// 	index += recv_partition[i].size;
+	// }
 
-	// sort unsorted data
+	// // sort unsorted data
+	// qsort(*sorted_data, total_size, sizeof(terarec_t), teraCompare);
+	printf("I am here\n");
+
 	qsort(*sorted_data, total_size, sizeof(terarec_t), teraCompare);
 
 	//print sorted counts
@@ -250,6 +291,7 @@ void terasort(terarec_t *local_data, int  local_len,
 
 	// Allgather total size of sorted data to root
 	MPI_Allgather(&total_size, 1, MPI_INT, sorted_counts, 1, MPI_INT, MPI_COMM_WORLD);
+	
 
 	// calculate displacements
 	sorted_displs[0] = 0;
@@ -259,14 +301,17 @@ void terasort(terarec_t *local_data, int  local_len,
 	}
 
 	// free partitions data
-	for (int i = 0; i < P; i++)
-	{
-		//free(partitions[i].data);
-		free(recv_partition[i].data);
-	}
+	// for (int i = 0; i < P; i++)
+	// {
+	// 	//free(partitions[i].data);
+	// 	free(recv_partition[i].data);
+	// }
 
 	//free(partitions);
-	free(recv_partition);
+	//free(recv_partition);
+	//free(partition_sizes);
+	//free(partition_displs);
+	//free(recv_partition_sizes);
 
 
 
